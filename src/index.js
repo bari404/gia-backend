@@ -23,6 +23,8 @@ app.use(
     origin: ["*"],
   })
 );
+// Opcional pero muy recomendable para que el preflight (OPTIONS) también tenga CORS:
+app.options("*", cors());
 
 app.use(express.json());
 
