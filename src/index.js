@@ -18,7 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 /* ======================================================
-   CORS SUPER EXPLÍCITO
+   CORS
 ====================================================== */
 
 const ALLOWED_ORIGINS = [
@@ -28,14 +28,16 @@ const ALLOWED_ORIGINS = [
   "https://www.giachatlove.com",
 ];
 
-// Middleware global CORS
+// Middleware global CORS + log
 app.use((req, res, next) => {
   const origin = req.headers.origin;
-  if (ALLOWED_ORIGINS.includes(origin)) {
+
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    // origen permitido: reflejamos el origin
     res.setHeader("Access-Control-Allow-Origin", origin);
   } else {
-    // en caso extremo, puedes abrirlo así:
-    // res.setHeader("Access-Control-Allow-Origin", "*");
+    // por si viene de otro sitio (p.ej. tests, extensiones…)
+    res.setHeader("Access-Control-Allow-Origin", "*");
   }
 
   res.setHeader(
@@ -52,7 +54,7 @@ app.use((req, res, next) => {
     `[REQ] ${req.method} ${req.path} - Origin: ${origin || "sin origin"}`
   );
 
-  // Responder directamente a los preflight
+  // responder directamente a los preflight
   if (req.method === "OPTIONS") {
     return res.sendStatus(204);
   }
@@ -60,7 +62,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Si quieres, puedes mantener también cors() por si acaso
+// cors extra (no hace daño y ayuda con OPTIONS en algunos entornos)
 app.use(
   cors({
     origin: ALLOWED_ORIGINS,
