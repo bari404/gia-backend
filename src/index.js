@@ -1,13 +1,18 @@
-// index.js
+// backend/src/index.js
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 dotenv.config();
+import path from "path";
+import { fileURLToPath } from "url";
 import multer from "multer";
 import fs from "fs";
 
 import { handleIA } from "./ia/handler.js";
 import { handleVoice } from "./ia/voice.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 console.log(
   "[index.js] API KEY:",
@@ -17,55 +22,14 @@ console.log(
 const app = express();
 const PORT = process.env.PORT || 3001;
 
-/* ======================================================
-   CORS SUPER EXPLÍCITO
-====================================================== */
-
-const ALLOWED_ORIGINS = [
-  "http://localhost:5173",
-  "http://localhost:5174",
-  "https://giachatlove.com",
-  "https://www.giachatlove.com",
-];
-
-// Middleware global CORS
-app.use((req, res, next) => {
-  const origin = req.headers.origin;
-  if (ALLOWED_ORIGINS.includes(origin)) {
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  } else {
-    // en caso extremo, puedes abrirlo así:
-    // res.setHeader("Access-Control-Allow-Origin", "*");
-  }
-
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
-  );
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-  );
-  res.setHeader("Vary", "Origin");
-
-  console.log(
-    `[REQ] ${req.method} ${req.path} - Origin: ${origin || "sin origin"}`
-  );
-
-  // Responder directamente a los preflight
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-
-  next();
-});
-
-// Si quieres, puedes mantener también cors() por si acaso
+// CORS abierto (para tu dominio y pruebas)
 app.use(
   cors({
-    origin: ALLOWED_ORIGINS,
+    origin: "*",
   })
 );
+// Preflight
+app.options("*", cors());
 
 app.use(express.json());
 
