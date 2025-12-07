@@ -28,48 +28,48 @@ const ALLOWED_ORIGINS = [
   "https://www.giachatlove.com",
 ];
 
-// Middleware global CORS + log
+const corsOptions = {
+  origin: (origin, callback) => {
+    // peticiones sin origin (Postman, curl...) -> permitir
+    if (!origin) return callback(null, true);
+
+    if (ALLOWED_ORIGINS.includes(origin)) {
+      return callback(null, true);
+    } else {
+      console.warn("[CORS] Origin NO permitido:", origin);
+      return callback(null, false);
+    }
+  },
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: [
+    "Origin",
+    "X-Requested-With",
+    "Content-Type",
+    "Accept",
+    "Authorization",
+  ],
+  credentials: true, // por si en el futuro usas cookies/autenticación
+};
+
+// aplicar CORS global
+app.use(cors(corsOptions));
+// responder preflight OPTIONS
+app.options("*", cors(corsOptions));
+
+/* ======================================================
+   LOG BÁSICO DE REQUEST
+====================================================== */
 app.use((req, res, next) => {
-  const origin = req.headers.origin;
-
-  if (origin && ALLOWED_ORIGINS.includes(origin)) {
-    // origen permitido: reflejamos el origin
-    res.setHeader("Access-Control-Allow-Origin", origin);
-  } else {
-    // por si viene de otro sitio (p.ej. tests, extensiones…)
-    res.setHeader("Access-Control-Allow-Origin", "*");
-  }
-
-  res.setHeader(
-    "Access-Control-Allow-Headers",
-    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
-  );
-  res.setHeader(
-    "Access-Control-Allow-Methods",
-    "GET,POST,PUT,PATCH,DELETE,OPTIONS"
-  );
-  res.setHeader("Vary", "Origin");
-
   console.log(
-    `[REQ] ${req.method} ${req.path} - Origin: ${origin || "sin origin"}`
+    `[REQ] ${req.method} ${req.path} - Origin: ${req.headers.origin || "sin origin"}`
   );
-
-  // responder directamente a los preflight
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(204);
-  }
-
   next();
 });
 
-// cors extra (no hace daño y ayuda con OPTIONS en algunos entornos)
-app.use(
-  cors({
-    origin: ALLOWED_ORIGINS,
-  })
-);
-
-app.use(express.json());
+/* ======================================================
+   MIDDLEWARES GENERALES
+====================================================== */
+app.use(express.json({ limit: "2mb" }));
 
 // carpeta temporal para subir audio
 const upload = multer({ dest: "uploads/" });
@@ -95,10 +95,10 @@ app.post("/api/ia", async (req, res) => {
       userId,
     });
 
-    res.json(datos);
+    return res.json(datos);
   } catch (err) {
     console.error("❌ ERROR EN /api/ia:", err);
-    res.status(500).json({ error: "Error procesando la IA" });
+    return res.status(500).json({ error: "Error procesando la IA" });
   }
 });
 
@@ -127,10 +127,10 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     // borrar archivo temporal
     fs.unlink(filePath, () => {});
 
-    res.json(datos);
+    return res.json(datos);
   } catch (e) {
     console.error("ERROR EN /api/voice:", e);
-    res.status(500).json({ error: "error_voice" });
+    return res.status(500).json({ error: "error_voice" });
   }
 });
 
@@ -140,3 +140,4 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 app.listen(PORT, () => {
   console.log("Backend escuchando en http://localhost:" + PORT);
 });
+
