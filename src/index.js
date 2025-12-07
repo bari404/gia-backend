@@ -30,7 +30,7 @@ const ALLOWED_ORIGINS = [
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // peticiones sin origin (Postman, curl...) -> permitir
+    // peticiones sin origin (curl, Postman...) -> permitir
     if (!origin) return callback(null, true);
 
     if (ALLOWED_ORIGINS.includes(origin)) {
@@ -48,7 +48,7 @@ const corsOptions = {
     "Accept",
     "Authorization",
   ],
-  credentials: true, // por si en el futuro usas cookies/autenticación
+  credentials: true,
 };
 
 // aplicar CORS global
@@ -57,7 +57,7 @@ app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
 /* ======================================================
-   LOG BÁSICO DE REQUEST
+   LOG BÁSICO
 ====================================================== */
 app.use((req, res, next) => {
   console.log(
@@ -67,12 +67,25 @@ app.use((req, res, next) => {
 });
 
 /* ======================================================
-   MIDDLEWARES GENERALES
+   MIDDLEWARES
 ====================================================== */
 app.use(express.json({ limit: "2mb" }));
 
-// carpeta temporal para subir audio
 const upload = multer({ dest: "uploads/" });
+
+/* ======================================================
+   RUTAS BÁSICAS / HEALTHCHECK
+====================================================== */
+
+// Railway suele usar / o /health para el healthcheck.
+// Estas rutas SIEMPRE devuelven 200.
+app.get("/", (req, res) => {
+  res.status(200).json({ ok: true, message: "GIA backend root OK" });
+});
+
+app.get("/health", (req, res) => {
+  res.status(200).json({ ok: true, message: "GIA backend healthy" });
+});
 
 /* ======================================================
    ENDPOINT IA TEXTO
@@ -103,7 +116,7 @@ app.post("/api/ia", async (req, res) => {
 });
 
 /* ======================================================
-   ENDPOINT IA VOZ (CON MULTER) 🎤
+   ENDPOINT IA VOZ
 ====================================================== */
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
@@ -124,7 +137,6 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       memoria,
     });
 
-    // borrar archivo temporal
     fs.unlink(filePath, () => {});
 
     return res.json(datos);
@@ -140,4 +152,3 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
 app.listen(PORT, () => {
   console.log("Backend escuchando en http://localhost:" + PORT);
 });
-
