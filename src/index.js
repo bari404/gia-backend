@@ -95,6 +95,13 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
     res.status(500).json({ error: "error_voice" });
   }
 });
+// ======================================================
+// ENDPOINT DE SALUD (para probar que está levantado)
+// GET https://gia-backend-production-2f8c.up.railway.app
+// ======================================================
+app.get("/", (req, res) => {
+  res.json({ ok: true });
+});
 
 /* ======================================================
    SERVIDOR
