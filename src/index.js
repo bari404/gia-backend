@@ -18,7 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 /* ======================================================
-   CORS
+   CORS SUPER EXPLÍCITO
 ====================================================== */
 
 const ALLOWED_ORIGINS = [
@@ -28,64 +28,49 @@ const ALLOWED_ORIGINS = [
   "https://www.giachatlove.com",
 ];
 
-const corsOptions = {
-  origin: (origin, callback) => {
-    // peticiones sin origin (curl, Postman...) -> permitir
-    if (!origin) return callback(null, true);
-
-    if (ALLOWED_ORIGINS.includes(origin)) {
-      return callback(null, true);
-    } else {
-      console.warn("[CORS] Origin NO permitido:", origin);
-      return callback(null, false);
-    }
-  },
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: [
-    "Origin",
-    "X-Requested-With",
-    "Content-Type",
-    "Accept",
-    "Authorization",
-  ],
-  credentials: true,
-};
-
-// aplicar CORS global
-app.use(cors(corsOptions));
-// responder preflight OPTIONS
-app.options("*", cors(corsOptions));
-
-/* ======================================================
-   LOG BÁSICO
-====================================================== */
+// Middleware global CORS
 app.use((req, res, next) => {
-  console.log(
-    `[REQ] ${req.method} ${req.path} - Origin: ${req.headers.origin || "sin origin"}`
+  const origin = req.headers.origin;
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    res.setHeader("Access-Control-Allow-Origin", origin);
+  } else {
+    // en caso extremo, puedes abrirlo así:
+    // res.setHeader("Access-Control-Allow-Origin", "*");
+  }
+
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept, Authorization"
   );
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PUT,PATCH,DELETE,OPTIONS"
+  );
+  res.setHeader("Vary", "Origin");
+
+  console.log(
+    `[REQ] ${req.method} ${req.path} - Origin: ${origin || "sin origin"}`
+  );
+
+  // Responder directamente a los preflight
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(204);
+  }
+
   next();
 });
 
-/* ======================================================
-   MIDDLEWARES
-====================================================== */
-app.use(express.json({ limit: "2mb" }));
+// Si quieres, puedes mantener también cors() por si acaso
+app.use(
+  cors({
+    origin: ALLOWED_ORIGINS,
+  })
+);
 
+app.use(express.json());
+
+// carpeta temporal para subir audio
 const upload = multer({ dest: "uploads/" });
-
-/* ======================================================
-   RUTAS BÁSICAS / HEALTHCHECK
-====================================================== */
-
-// Railway suele usar / o /health para el healthcheck.
-// Estas rutas SIEMPRE devuelven 200.
-app.get("/", (req, res) => {
-  res.status(200).json({ ok: true, message: "GIA backend root OK" });
-});
-
-app.get("/health", (req, res) => {
-  res.status(200).json({ ok: true, message: "GIA backend healthy" });
-});
 
 /* ======================================================
    ENDPOINT IA TEXTO
@@ -108,15 +93,15 @@ app.post("/api/ia", async (req, res) => {
       userId,
     });
 
-    return res.json(datos);
+    res.json(datos);
   } catch (err) {
     console.error("❌ ERROR EN /api/ia:", err);
-    return res.status(500).json({ error: "Error procesando la IA" });
+    res.status(500).json({ error: "Error procesando la IA" });
   }
 });
 
 /* ======================================================
-   ENDPOINT IA VOZ
+   ENDPOINT IA VOZ (CON MULTER) 🎤
 ====================================================== */
 app.post("/api/voice", upload.single("audio"), async (req, res) => {
   try {
@@ -137,12 +122,13 @@ app.post("/api/voice", upload.single("audio"), async (req, res) => {
       memoria,
     });
 
+    // borrar archivo temporal
     fs.unlink(filePath, () => {});
 
-    return res.json(datos);
+    res.json(datos);
   } catch (e) {
     console.error("ERROR EN /api/voice:", e);
-    return res.status(500).json({ error: "error_voice" });
+    res.status(500).json({ error: "error_voice" });
   }
 });
 
