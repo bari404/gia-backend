@@ -41,26 +41,28 @@ const upload = multer({ dest: "uploads/" });
 ====================================================== */
 app.post("/api/ia", async (req, res) => {
   try {
-    const { mensaje, modo, relacion, memoria, userId } = req.body || {};
-
-    if (!mensaje) {
-      return res.status(400).json({ error: "Mensaje vacío" });
-    }
-
-    console.log("[/api/ia] userId recibido:", userId);
-
-    const datos = await handleIA({
+    const {
       mensaje,
       modo,
       relacion,
       memoria,
       userId,
+      companion, // 👈 viene del frontend: "gia" o "gio"
+    } = req.body;
+
+    const data = await handleIA({
+      mensaje,
+      modo,
+      relacion,
+      memoria,
+      userId,
+      companion, // 👈 se lo pasamos al handler
     });
 
-    res.json(datos);
+    res.json(data);
   } catch (err) {
-    console.error("❌ ERROR EN /api/ia:", err);
-    res.status(500).json({ error: "Error procesando la IA" });
+    console.error("Error en /api/ia:", err);
+    res.status(500).json({ error: "ia_fail" });
   }
 });
 
