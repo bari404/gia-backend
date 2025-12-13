@@ -1,19 +1,43 @@
 import { stripe } from "./stripeClient.js";
 import { supabaseServer } from "../lib/supabaseClient.js";
 
-async function upsertProfileStripe({ userId, plan, customerId, sub }) {
-  await supabaseServer
+const PRICE_PAREJA = process.env.STRIPE_PRICE_PAREJA;
+const PRICE_X = process.env.STRIPE_PRICE_X;
+
+function planFromSubscription(sub) {
+  const priceIds = (sub?.items?.data || [])
+    .map((it) => it?.price?.id)
+    .filter(Boolean);
+
+  if (priceIds.includes(PRICE_X)) return "x";
+  if (priceIds.includes(PRICE_PAREJA)) return "pareja";
+  return "free";
+}
+
+async function updateProfileByUserId(userId, fields) {
+  if (!userId) return;
+  const { error } = await supabaseServer
     .from("profiles")
-    .update({
-      plan: plan || "free",
-      stripe_customer_id: customerId || null,
-      stripe_subscription_id: sub?.id || null,
-      stripe_status: sub?.status || null,
-      stripe_current_period_end: sub?.current_period_end
-        ? new Date(sub.current_period_end * 1000).toISOString()
-        : null,
-    })
+    .update({ ...fields, updated_at: new Date().toISOString?.() })
     .eq("id", userId);
+
+  if (error) console.error("[stripe] supabase update error:", error);
+}
+
+async function updateProfileBySubscriptionId(subscriptionId, fields) {
+  const { data, error } = await supabaseServer
+    .from("profiles")
+    .select("id")
+    .eq("stripe_subscription_id", subscriptionId)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[stripe] supabase select error:", error);
+    return;
+  }
+  if (!data?.id) return;
+
+  await updateProfileByUserId(data.id, fields);
 }
 
 export async function stripeWebhookHandler(req, res) {
@@ -21,53 +45,63 @@ export async function stripeWebhookHandler(req, res) {
   let event;
 
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(
+      req.body, // RAW buffer
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
   } catch (err) {
-    console.error("[stripe] bad signature:", err.message);
+    console.error("[stripe] webhook signature failed:", err.message);
     return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   try {
+    // ✅ Cuando termina checkout
     if (event.type === "checkout.session.completed") {
       const session = event.data.object;
 
       const userId = session.client_reference_id || session.metadata?.userId;
-      const plan = session.metadata?.plan; // 'pareja' | 'x'
       const customerId = session.customer;
       const subscriptionId = session.subscription;
 
       const sub = await stripe.subscriptions.retrieve(subscriptionId);
+      const plan = planFromSubscription(sub);
 
-      await upsertProfileStripe({ userId, plan, customerId, sub });
+      await updateProfileByUserId(userId, {
+        plan,
+        stripe_customer_id: customerId || null,
+        stripe_subscription_id: subscriptionId || null,
+        stripe_status: sub.status || null,
+        stripe_current_period_end: sub.current_period_end
+          ? new Date(sub.current_period_end * 1000).toISOString()
+          : null,
+      });
     }
 
+    // ✅ Mantener sincronizado
     if (
       event.type === "customer.subscription.updated" ||
       event.type === "customer.subscription.deleted"
     ) {
       const sub = event.data.object;
+      const plan = planFromSubscription(sub);
 
-      // buscamos el user por stripe_subscription_id
-      const { data: profile } = await supabaseServer
-        .from("profiles")
-        .select("id, plan")
-        .eq("stripe_subscription_id", sub.id)
-        .single();
-
-      if (profile?.id) {
-        // si se cancela / no está activo, puedes dejar plan pero el check usará stripe_status
-        await upsertProfileStripe({
-          userId: profile.id,
-          plan: profile.plan,
-          customerId: sub.customer,
-          sub,
-        });
-      }
+      await updateProfileBySubscriptionId(sub.id, {
+        plan: ["active", "trialing"].includes((sub.status || "").toLowerCase())
+          ? plan
+          : "free", // si deja de estar activo -> free
+        stripe_customer_id: sub.customer || null,
+        stripe_subscription_id: sub.id || null,
+        stripe_status: sub.status || null,
+        stripe_current_period_end: sub.current_period_end
+          ? new Date(sub.current_period_end * 1000).toISOString()
+          : null,
+      });
     }
 
-    res.json({ received: true });
+    return res.json({ received: true });
   } catch (e) {
     console.error("[stripe] webhook handler error:", e);
-    res.status(500).send("Webhook handler failed");
+    return res.status(500).send("Webhook handler failed");
   }
 }
