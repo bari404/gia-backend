@@ -33,6 +33,10 @@ app.options("*", cors());
 
 app.use(express.json());
 
+app.get("/api/stripe/ping", (req, res) => {
+  res.json({ ok: true, where: "src/index.js" });
+});
+
 // carpeta temporal para subir audio
 const upload = multer({ dest: "uploads/" });
 
