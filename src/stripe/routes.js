@@ -1,3 +1,5 @@
+router.get("/ping", (req, res) => res.json({ ok: true }));
+
 import express from "express";
 import { stripe } from "./stripeClient.js";
 import { supabaseServer } from "../lib/supabaseClient.js";
@@ -86,3 +88,4 @@ router.post("/create-portal-session", async (req, res) => {
 });
 
 export default router;
+
