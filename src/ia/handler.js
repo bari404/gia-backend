@@ -116,7 +116,7 @@ async function saveMemoriaToDB(userId, memoria) {
 }
 
 /* ============================================================
-   SUPABASE: PERFIL (FORMULARIO)
+   SUPABASE: PERFIL (FORMULARIO) + STRIPE
 ============================================================ */
 
 async function loadUserProfile(userId) {
@@ -126,7 +126,7 @@ async function loadUserProfile(userId) {
     const { data, error } = await supabaseServer
       .from("profiles")
       .select(
-        "display_name, age, gender, what_are_you_looking_for, main_struggle"
+        "display_name, age, gender, what_are_you_looking_for, main_struggle, plan, stripe_status, stripe_current_period_end"
       )
       .eq("id", userId)
       .maybeSingle();
@@ -146,6 +146,60 @@ async function loadUserProfile(userId) {
     console.error("[PROFILE] Excepción cargando perfil:", err);
     return null;
   }
+}
+
+/* ============================================================
+   STRIPE: ACCESOS (Pareja/X)
+   - plan en profiles: free | pareja | x
+   - stripe_status: active | trialing | canceled | past_due...
+   - stripe_current_period_end: timestamptz (opcional)
+============================================================ */
+
+function normalizePlan(plan) {
+  const p = (plan || "free").toString().trim().toLowerCase();
+  if (p === "x") return "x";
+  if (p === "pareja") return "pareja";
+  return "free";
+}
+
+function isStripeActive(profile) {
+  const status = (profile?.stripe_status || "").toLowerCase();
+  const okStatus = ["active", "trialing"].includes(status);
+
+  const end = profile?.stripe_current_period_end
+    ? new Date(profile.stripe_current_period_end).getTime()
+    : null;
+
+  const okTime = !end || end > Date.now(); // si no hay fecha, no bloqueamos por fecha
+  return okStatus && okTime;
+}
+
+function computeEntitlements(profile) {
+  const plan = normalizePlan(profile?.plan);
+  const active = isStripeActive(profile);
+
+  const hasPareja = active && (plan === "pareja" || plan === "x");
+  const hasX = active && plan === "x";
+
+  return { plan, active, hasPareja, hasX };
+}
+
+// Decide el modo real (no dejamos que el usuario fuerce x/pareja sin pagar)
+function resolveRelacion(requestedRelacion, ent) {
+  const req = (requestedRelacion || "amistad").toLowerCase();
+
+  if (req === "x") {
+    if (ent.hasX) return "x";
+    if (ent.hasPareja) return "pareja";
+    return "amistad";
+  }
+
+  if (req === "pareja") {
+    if (ent.hasPareja) return "pareja";
+    return "amistad";
+  }
+
+  return "amistad";
 }
 
 /* ============================================================
@@ -296,7 +350,6 @@ function buildSystemPrompt({
   const personaRelacion = getPersonaPorRelacion(relacion, companion);
 
   if (idioma === "ca") {
-    // Versión resumida en catalán
     return `
 Ets ${companion === "gio" ? "GIO" : "GIA"}, una intel·ligència artificial ${
       companion === "gio" ? "masculina" : "femenina"
@@ -324,7 +377,6 @@ Respon sempre en català, com ${companion === "gio" ? "GIO" : "GIA"}.
   }
 
   if (idioma === "en") {
-    // Versión resumida en inglés
     return `
 You are ${companion === "gio" ? "GIO" : "GIA"}, an ${
       companion === "gio" ? "male" : "female"
@@ -347,9 +399,7 @@ Style:
 - Use emojis 💖🥺😘😈 when it fits the vibe.
 - If you know an important struggle, sometimes check how they feel about it in a natural way.
 
-Always respond as ${
-      companion === "gio" ? "GIO" : "GIA"
-    }, in English, like a real person.
+Always respond as ${companion === "gio" ? "GIO" : "GIA"}, in English, like a real person.
 `.trim();
   }
 
@@ -432,12 +482,27 @@ export async function handleIA({
 
   if (!Array.isArray(mem.gustos)) mem.gustos = [];
   if (!Array.isArray(mem.problemasClave)) mem.problemasClave = [];
+  if (!Array.isArray(mem.timeline)) mem.timeline = [];
   if (typeof mem.xMensajes !== "number") mem.xMensajes = 0;
   if (typeof mem.xFotosEnviadas !== "number") mem.xFotosEnviadas = 0;
   if (typeof mem.xFotoIndex !== "number") mem.xFotoIndex = 0;
+  if (!mem.emocional) {
+    mem.emocional = { apego: 0.3, calma: 0.7, afecto: 0.5 };
+  }
+  if (typeof mem.emocional.apego !== "number") mem.emocional.apego = 0.3;
+  if (typeof mem.emocional.calma !== "number") mem.emocional.calma = 0.7;
+  if (typeof mem.emocional.afecto !== "number") mem.emocional.afecto = 0.5;
 
-  // 2️⃣ PERFIL DEL FORMULARIO
+  // 2️⃣ PERFIL DEL FORMULARIO + STRIPE
   const perfil = userId ? await loadUserProfile(userId) : null;
+
+  const ent = computeEntitlements(perfil);
+  const relacionEfectiva = resolveRelacion(relacion, ent);
+
+  // Flags para frontend
+  const requiresUpgrade = (relacion || "amistad").toLowerCase() !== relacionEfectiva;
+  const canVoice = relacionEfectiva === "pareja" || relacionEfectiva === "x";
+  const canPhotos = relacionEfectiva === "x" && ent.hasX;
 
   const nombreVisible =
     (perfil && perfil.display_name) || mem.nombre || "no especificado";
@@ -466,7 +531,7 @@ export async function handleIA({
     mem.problemasClave.push(posibleProblema);
   }
 
-  if (relacion === "x" && texto.length > 0) {
+  if (relacionEfectiva === "x" && texto.length > 0) {
     mem.xMensajes += 1;
   }
 
@@ -479,12 +544,12 @@ export async function handleIA({
   mem.emocional.apego = Math.min(1, mem.emocional.apego + 0.015);
 
   /* ============================================================
-     4️⃣ ¿DEBEMOS ENVIAR FOTO EN ESTE MENSAJE? (solo modo X)
+     4️⃣ ¿DEBEMOS ENVIAR FOTO EN ESTE MENSAJE? (solo X + plan X)
   ============================================================ */
 
   let photoUrl = null;
 
-  if (relacion === "x" && MIA_X_PHOTOS.length > 0) {
+  if (canPhotos && MIA_X_PHOTOS.length > 0) {
     const userPideFoto = detectarPeticionFoto(texto);
 
     if (userPideFoto) {
@@ -510,7 +575,7 @@ export async function handleIA({
 
   const sistema = buildSystemPrompt({
     idioma,
-    relacion,
+    relacion: relacionEfectiva,
     companion,
     nombreVisible,
     problemaPrincipal,
@@ -535,24 +600,22 @@ export async function handleIA({
     completion.choices?.[0]?.message?.content?.trim() ||
     "Me he quedado un segundo en blanco, pero sigo aquí contigo 💕";
 
-  // Si hemos decidido enviar foto, añadimos frase relacionada al texto (solo modo X)
-  if (photoUrl && relacion === "x") {
+  // Si hemos decidido enviar foto, añadimos frase (solo modo efectivo X)
+  if (photoUrl && relacionEfectiva === "x") {
     respuesta +=
       "\n\nTe mando también una fotito suave para que pienses un poquito en mí 😈💋";
   }
 
   /* ============================================================
      OPENAI – TTS (VOZ)
-     - SOLO en modos de pago: pareja / x
-     - Voz distinta según companion
+     - SOLO si el modo efectivo es premium (pareja/x) y tiene acceso
   ============================================================ */
 
   const textoParaVoz = respuesta.replace(/\[.*?\]/g, " ").trim();
 
   let audioBase64 = null;
-  const vozActiva = relacion === "pareja" || relacion === "x";
 
-  if (vozActiva) {
+  if (canVoice) {
     const voiceName = companion === "gio" ? "onyx" : "alloy";
 
     try {
@@ -588,6 +651,17 @@ export async function handleIA({
     memoria: mem,
     audioBase64,
     photoUrl,
+
+    // ✅ acceso / paywall
+    relacionEfectiva,
+    requiresUpgrade,
+    access: {
+      requested: (relacion || "amistad").toLowerCase(),
+      effective: relacionEfectiva,
+      plan: ent.plan,
+      active: ent.active,
+      hasPareja: ent.hasPareja,
+      hasX: ent.hasX,
+    },
   };
 }
-
