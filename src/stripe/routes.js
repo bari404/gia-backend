@@ -1,6 +1,7 @@
 // backend/src/stripe/routes.js
 import express from "express";
 import { stripe } from "./stripeClient.js";
+import { supabaseServer } from "../lib/supabaseClient.js";
 
 const router = express.Router();
 
@@ -75,4 +76,5 @@ router.post("/create-portal-session", async (req, res) => {
 });
 
 export default router;
+
 
