@@ -10,6 +10,8 @@ import fs from "fs";
 
 import { handleIA } from "./ia/handler.js";
 import { handleVoice } from "./ia/voice.js";
+import stripeRoutes from "./stripe/routes.js";
+import { stripeWebhookHandler } from "./stripe/webhook.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -31,10 +33,19 @@ app.use(
 // Preflight
 app.options("*", cors());
 
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
+
 app.use(express.json());
 
 app.get("/api/stripe/ping", (req, res) => {
   res.json({ ok: true, where: "src/index.js" });
+});
+
+
+app.use("/api/stripe", stripeRoutes);
+
+app.get("/api/stripe/debug-mounted", (req, res) => {
+  res.json({ ok: true, msg: "stripeRoutes MOUNTED at /api/stripe" });
 });
 
 // carpeta temporal para subir audio
@@ -115,3 +126,4 @@ app.get("/", (req, res) => {
 app.listen(PORT, () => {
   console.log("Backend escuchando en http://localhost:" + PORT);
 });
+
