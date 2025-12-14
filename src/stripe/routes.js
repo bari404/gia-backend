@@ -40,4 +40,39 @@ router.post("/create-checkout-session", async (req, res) => {
   }
 });
 
+// ✅ Crear sesión de Stripe Customer Portal
+router.post("/create-portal-session", async (req, res) => {
+  try {
+    const { userId } = req.body;
+    if (!userId) return res.status(400).json({ error: "missing_userId" });
+
+    // Leer customer_id desde Supabase
+    const { data: profile, error } = await supabaseServer
+      .from("profiles")
+      .select("stripe_customer_id")
+      .eq("id", userId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("[portal] supabase read error:", error);
+      return res.status(500).json({ error: "supabase_error" });
+    }
+
+    if (!profile?.stripe_customer_id) {
+      return res.status(400).json({ error: "no_customer" });
+    }
+
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer: profile.stripe_customer_id,
+      return_url: `${process.env.FRONTEND_URL}/`,
+    });
+
+    return res.json({ url: portalSession.url });
+  } catch (e) {
+    console.error("[portal] error:", e);
+    return res.status(500).json({ error: "portal_error", message: e?.message });
+  }
+});
+
 export default router;
+
